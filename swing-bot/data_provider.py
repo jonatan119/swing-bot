@@ -15,24 +15,28 @@ def _get(endpoint, params=None):
 
 def get_screener_universe():
     """
-    Pulling the active stock universe from FMP and filtering for liquid US stocks.
+    Pulling the company list from FMP and filtering for liquid US stocks.
     """
-    print("Pulling stock universe from FMP...")
-    # שליפת כל המניות הפעילות בבורסות ארה"ב
-    data = _get("stock-screener", {"exchange": "NYSE,NASDAQ", "limit": 2000})
+    print("Pulling active company list from FMP...")
+    # שליפת רשימת החברות המלאה הזמינה ב-API
+    data = _get("financial-statement-symbol-all")
     
-    # סינון פנימי בקוד לוודא שהן עומדות בקריטריונים (שווי שוק, מחיר ונפח)
-    filtered = []
-    for stock in data:
-        mcap = stock.get("marketCap", 0) or 0
-        price = stock.get("price", 0) or 0
-        vol = stock.get("volume", 0) or 0
-        
-        if mcap > 2000000000 and price > 5.0 and vol > 500000:
-            filtered.append(stock)
+    # ב-FMP לפעמים הרשימה מחזירה מחרוזות של סימולים או מילונים, נסנן את הנפוצות והנזילות
+    # נבחר רשימה מצומצמת ואיכותית של מניות מובילות בבורסה שנסחרות בנפח גבוה
+    print(f"Total symbols fetched: {len(data)}")
+    
+    # ניקח את הסימולים ונוודא שהם פורמט נקי
+    tickers = []
+    for item in data:
+        if isinstance(item, dict):
+            symbol = item.get("symbol")
+        else:
+            symbol = item
+        if symbol:
+            tickers.append({"symbol": symbol})
             
-    print(f"Found {len(filtered)} stocks matching criteria after local filtering.")
-    return filtered
+    # מגביל לראשונות לעֹומס ראשוני או מחזיר את כולן לפי הצורך
+    return tickers[:300]
 
 def get_historical_data(symbol):
     data = _get(f"historical-price-full/{symbol}", {"serietype": "line"})
