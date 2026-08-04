@@ -1,18 +1,54 @@
+import sys
 import time
 import requests
 import pandas as pd
 
 import config
 
-BASE_URL = "https://financialmodelingprep.com"
+BASE_URL = "https://financialmodelingprep.com/stable"
 
 
 def _get(path, params=None):
-    params = params or {}
+    """
+    GET a stable-API endpoint. Raises requests.HTTPError on non-2xx, but
+    first prints a clear diagnostic (URL + status + response body) so
+    failures are easy to debug from the GitHub Actions log instead of just
+    showing a bare traceback.
+    """
+    params = dict(params or {})
     params["apikey"] = config.FMP_API_KEY
-    resp = requests.get(f"{BASE_URL}{path}", params=params, timeout=config.REQUEST_TIMEOUT)
+    url = f"{BASE_URL}/{path.lstrip('/')}"
+
+    resp = requests.get(url, params=params, timeout=config.REQUEST_TIMEOUT)
+
+    if not resp.ok:
+        safe_url = resp.url.replace(config.FMP_API_KEY, "***")
+        print(
+            f"FMP API error: {resp.status_code} for {safe_url}\n"
+            f"Response body: {resp.text[:500]}",
+            file=sys.stderr,
+        )
     resp.raise_for_status()
     return resp.json()
+
+
+def check_api_key():
+    """
+    Quick sanity check called once at startup: confirms the API key is
+    valid and the account can reach the stable API before we burn time
+    looping over hundreds of tickers. Raises RuntimeError with a clear
+    message on failure instead of a confusing mid-scan crash.
+    """
+    if not config.FMP_API_KEY:
+        raise RuntimeError("FMP_API_KEY is not set.")
+    try:
+        _get("profile", params={"symbol": "AAPL"})
+    except requests.HTTPError as exc:
+        raise RuntimeError(
+            "FMP API key check failed - the key may be invalid, expired, "
+            "or lack access to the stable API on your current plan. "
+            f"Original error: {exc}"
+        ) from exc
 
 
 def get_screener_universe():
@@ -30,23 +66,55 @@ def get_screener_universe():
         "isActivelyTrading": "true",
         "limit": config.SCREENER_LIMIT,
     }
-    data = _get("/stable/company-screener", params=params)
+    data = _get("company-screener", params=params)
     if not isinstance(data, list):
+        print(f"Unexpected screener response shape: {type(data)}", file=sys.stderr)
         return []
     return [row["symbol"] for row in data if "symbol" in row]
 
 
 def get_analyst_rating(symbol):
     """
-    Returns the consensus rating label (e.g. 'Strong Buy', 'Buy', 'Hold', 'Sell')
+    Returns the consensus rating label (e.g. 'Strong Buy', 'Buy', 'Hold',
+    'Sell', 'Strong Sell') derived from the real analyst grade distribution,
     or None if unavailable.
+
+    Uses /stable/grades-consensus, which aggregates actual Wall Street
+    analyst grades into strongBuy/buy/hold/sell/strongSell counts plus a
+    computed consensus label - this is genuine analyst consensus, distinct
+    from FMP's separate quant-based "ratings-snapshot" endpoint.
     """
     try:
-        data = _get("/stable/ratings-snapshot", params={"symbol": symbol})
-        if isinstance(data, list) and data:
-            return data[0].get("ratingRecommendation")
-    except requests.RequestException:
+        data = _get("grades-consensus", params={"symbol": symbol})
+    except requests.RequestException as exc:
+        print(f"  {symbol}: analyst rating lookup failed - {exc}", file=sys.stderr)
         return None
+
+    if isinstance(data, list) and data:
+        row = data[0]
+        consensus = row.get("consensus")
+        if consensus:
+            return consensus
+        # Fallback: derive a label ourselves from the raw counts if FMP
+        # ever omits the 'consensus' field.
+        strong_buy = row.get("strongBuy", 0) or 0
+        buy = row.get("buy", 0) or 0
+        hold = row.get("hold", 0) or 0
+        sell = row.get("sell", 0) or 0
+        strong_sell = row.get("strongSell", 0) or 0
+        total = strong_buy + buy + hold + sell + strong_sell
+        if total == 0:
+            return None
+        score = (strong_buy * 5 + buy * 4 + hold * 3 + sell * 2 + strong_sell * 1) / total
+        if score >= 4.5:
+            return "Strong Buy"
+        if score >= 3.5:
+            return "Buy"
+        if score >= 2.5:
+            return "Hold"
+        if score >= 1.5:
+            return "Sell"
+        return "Strong Sell"
     return None
 
 
@@ -58,10 +126,11 @@ def get_daily_history(symbol, days=None):
     days = days or config.HISTORY_DAYS
     try:
         data = _get(
-            "/stable/historical-price-eod/full",
-            params={"symbol": symbol, "serietype": "line"},
+            "historical-price-eod/full",
+            params={"symbol": symbol},
         )
-    except requests.RequestException:
+    except requests.RequestException as exc:
+        print(f"  {symbol}: history lookup failed - {exc}", file=sys.stderr)
         return None
 
     rows = data if isinstance(data, list) else data.get("historical", [])
