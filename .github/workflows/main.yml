@@ -1,0 +1,24 @@
+name: Swing Trade Scanner
+
+on:
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: |
+          cd swing-bot
+          pip install -r requirements.txt
+      - name: Run Scanner
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: |
+          cd swing-bot
+          python scanner.py
