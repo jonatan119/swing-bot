@@ -15,13 +15,19 @@ def _get(endpoint, params=None):
 
 def get_screener_universe():
     """
-    Returning a fixed list of liquid US tickers for the free tier,
-    bypassing the paid screener endpoint limit.
+    Pulling pre-filtered universe from FMP screener (Requires paid plan).
     """
-    print("Using free-tier predefined ticker list...")
-    # רשימת מניות לדוגמה שנסחרות בנפח גבוה ומתאימות לשורט/לונג סווינג
-    tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "PLTR", "CVS", "TGT", "AMD", "NFLX"]
-    return [{"symbol": ticker} for ticker in tickers]
+    print("Pulling pre-filtered universe from FMP screener...")
+    params = {
+        "marketCapMoreThan": 2000000000,
+        "priceMoreThan": 5.0,
+        "volumeMoreThan": 500000,
+        "exchange": "NYSE,NASDAQ",
+        "isActiveTrading": "true",
+        "limit": 1000
+    }
+    data = _get("company-screener", params=params)
+    return data
 
 def get_historical_data(symbol):
     data = _get(f"historical-price-full/{symbol}", {"serietype": "line"})
