@@ -15,19 +15,24 @@ def _get(endpoint, params=None):
 
 def get_screener_universe():
     """
-    Pulling pre-filtered universe from FMP screener (Requires paid plan).
+    Pulling the active stock universe from FMP and filtering for liquid US stocks.
     """
-    print("Pulling pre-filtered universe from FMP screener...")
-    params = {
-        "marketCapMoreThan": 2000000000,
-        "priceMoreThan": 5.0,
-        "volumeMoreThan": 500000,
-        "exchange": "NYSE,NASDAQ",
-        "isActiveTrading": "true",
-        "limit": 1000
-    }
-    data = _get("company-screener", params=params)
-    return data
+    print("Pulling stock universe from FMP...")
+    # שליפת כל המניות הפעילות בבורסות ארה"ב
+    data = _get("stock-screener", {"exchange": "NYSE,NASDAQ", "limit": 2000})
+    
+    # סינון פנימי בקוד לוודא שהן עומדות בקריטריונים (שווי שוק, מחיר ונפח)
+    filtered = []
+    for stock in data:
+        mcap = stock.get("marketCap", 0) or 0
+        price = stock.get("price", 0) or 0
+        vol = stock.get("volume", 0) or 0
+        
+        if mcap > 2000000000 and price > 5.0 and vol > 500000:
+            filtered.append(stock)
+            
+    print(f"Found {len(filtered)} stocks matching criteria after local filtering.")
+    return filtered
 
 def get_historical_data(symbol):
     data = _get(f"historical-price-full/{symbol}", {"serietype": "line"})
